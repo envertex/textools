@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Module: blackarch
+# Purpose: Install BlackArch repository
+# Author: envertex
+
+set -Eeuo pipefail
+
+# =======================
+# LOGGING (minimal)
+# =======================
+CLR_INFO="\033[0;34m"
+CLR_OK="\033[0;32m"
+CLR_ERROR="\033[0;31m"
+CLR_RESET="\033[0m"
+
+log_info()  { echo -e "${CLR_INFO}[INFO]${CLR_RESET}  $1"; }
+log_ok()    { echo -e "${CLR_OK}[OK]${CLR_RESET}    $1"; }
+log_error() { echo -e "${CLR_ERROR}[ERROR]${CLR_RESET} $1"; }
+
+# =======================
+# ROOT CHECK
+# =======================
+if [[ "$EUID" -ne 0 ]]; then
+  log_error "Must be run as root"
+  exit 1
+fi
+
+# =======================
+# OS VALIDATION
+# =======================
+if ! command -v pacman &>/dev/null; then
+  log_error "pacman not found (Arch-based system required)"
+  exit 1
+fi
+
+# =======================
+# BLACKARCH CHECK
+# =======================
+if grep -q "^\[blackarch\]" /etc/pacman.conf 2>/dev/null; then
+  log_ok "BlackArch repository already installed"
+else
+  log_info "Installing BlackArch repository"
+
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  curl -fsSL https://blackarch.org/strap.sh -o "$tmpdir/strap.sh"
+  chmod +x "$tmpdir/strap.sh"
+
+  if ! "$tmpdir/strap.sh" &>/dev/null; then
+    log_error "BlackArch installation failed"
+    exit 1
+  fi
+
+  log_ok "BlackArch repository installed"
+fi
+
+# =======================
+# SYNC REPOS
+# =======================
+log_info "Syncing package databases"
+pacman -Syy --noconfirm &>/dev/null
+
+log_ok "BlackArch setup completed"
+exit 0

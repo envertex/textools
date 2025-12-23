@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Module: word-list
+# Purpose: Install wordlists (SecLists + envertex wordlists)
+# Author: envertex
+
+set -Eeuo pipefail
+
+# =======================
+# LOGGING
+# =======================
+CLR_INFO="\033[0;34m"
+CLR_OK="\033[0;32m"
+CLR_WARN="\033[1;33m"
+CLR_ERROR="\033[0;31m"
+CLR_RESET="\033[0m"
+
+log_info()  { echo -e "${CLR_INFO}[INFO]${CLR_RESET}  $1"; }
+log_ok()    { echo -e "${CLR_OK}[OK]${CLR_RESET}    $1"; }
+log_warn()  { echo -e "${CLR_WARN}[WARN]${CLR_RESET}  $1"; }
+log_error() { echo -e "${CLR_ERROR}[ERROR]${CLR_RESET} $1"; }
+
+# =======================
+# ROOT + OS CHECK
+# =======================
+if [[ "$EUID" -ne 0 ]]; then
+  log_error "Must be run as root"
+  exit 1
+fi
+
+if ! command -v pacman &>/dev/null; then
+  log_error "pacman not found (Arch-based system required)"
+  exit 1
+fi
+
+# =======================
+# VARIABLES
+# =======================
+WORDLISTS_DIR="/usr/share/wordlists"
+SECLISTS_DIR="/usr/share/SecLists"
+
+SECLISTS_REPO="https://github.com/danielmiessler/SecLists.git"
+WORDLISTS_REPO="https://github.com/envertex/wordlists.git"
+
+REAL_USER="${SUDO_USER:-root}"
+
+# =======================
+# DEPENDENCIES
+# =======================
+log_info "Installing required tools"
+pacman -S --needed --noconfirm git unzip tar gzip p7zip || {
+  log_error "Failed to install dependencies"
+  exit 1
+}
+log_ok "Dependencies ready"
+
+# =======================
+# WORDLISTS DIR
+# =======================
+log_info "Preparing /usr/share/wordlists"
+mkdir -p "$WORDLISTS_DIR"
+chown "$REAL_USER:$REAL_USER" "$WORDLISTS_DIR" || true
+log_ok "Wordlists directory ready"
+
+# =======================
+# SECLISTS (DIRECT CLONE)
+# =======================
+if [[ ! -d "$SECLISTS_DIR/.git" ]]; then
+  log_info "Cloning SecLists into /usr/share"
+  rm -rf "$SECLISTS_DIR"
+
+  if git clone --depth 1 "$SECLISTS_REPO" "$SECLISTS_DIR"; then
+    chown -R "$REAL_USER:$REAL_USER" "$SECLISTS_DIR" || true
+    log_ok "SecLists installed"
+  else
+    log_error "Failed to clone SecLists"
+    exit 1
+  fi
+else
+  log_ok "SecLists already present"
+fi
+
+# =======================
+# EXTRA WORDLISTS (envertex)
+# =======================
+log_info "Cloning envertex wordlists"
+TMP="$(mktemp -d)"
+
+if git clone --depth 1 "$WORDLISTS_REPO" "$TMP"; then
+  cp -r "$TMP"/* "$WORDLISTS_DIR"/ || true
+  rm -rf "$TMP"
+  log_ok "Extra wordlists copied"
+else
+  rm -rf "$TMP"
+  log_error "Failed to clone envertex wordlists"
+  exit 1
+fi
+
+# =======================
+# EXTRACTION (ALL FORMATS)
+# =======================
+log_info "Extracting wordlist archives"
+
+shopt -s nullglob
+for f in "$WORDLISTS_DIR"/*; do
+  case "${f,,}" in
+    *.zip) unzip -o "$f" -d "$WORDLISTS_DIR" >/dev/null ;;
+    *.tar) tar -xf "$f" -C "$WORDLISTS_DIR" >/dev/null ;;
+    *.tgz|*.tar.gz) tar -xzf "$f" -C "$WORDLISTS_DIR" >/dev/null ;;
+    *.txz|*.tar.xz) tar -xJf "$f" -C "$WORDLISTS_DIR" >/dev/null ;;
+    *.7z) 7z x -y "$f" -o"$WORDLISTS_DIR" >/dev/null ;;
+    *.gz)
+      [[ "$(basename "$f")" == rockyou* ]] && gunzip -f "$f" >/dev/null || true
+      ;;
+  esac
+  rm -f "$f" || true
+done
+shopt -u nullglob
+
+log_ok "Extraction completed"
+
+# =======================
+# CLEANUP
+# =======================
+find "$WORDLISTS_DIR" -type d -empty -delete || true
+chown -R "$REAL_USER:$REAL_USER" "$WORDLISTS_DIR" || true
+
+# =======================
+# FINAL CHECK
+# =======================
+if [[ -f "$WORDLISTS_DIR/rockyou.txt" ]]; then
+  log_ok "rockyou.txt ready"
+else
+  log_warn "rockyou.txt not found"
+fi
+
+# =======================
+# DONE
+# =======================
+log_ok "Wordlists environment ready"
+exit 0
