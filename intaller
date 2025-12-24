@@ -156,7 +156,7 @@ for m in "${MODULE_ORDER[@]}"; do
   [[ -f "$MODULES_DIR/$m" ]] || {
     log_error "Missing module: modules/$m"
     exit 1
-  }
+  done
 done
 
 # =======================
